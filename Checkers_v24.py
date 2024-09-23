@@ -139,6 +139,9 @@ class Checkers:
             s.Action(s.moves[m][0],s.moves[m][1])
         s.Action(s.moves[m][2],s.moves[m][3])
 
+
+
+
     ####
 	#+-added to determine whether the player whose turn it is has more pieces than opponent
 	####
