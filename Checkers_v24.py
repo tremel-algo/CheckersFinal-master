@@ -72,154 +72,208 @@ class Checkers:
     #+-added to be able to control the computer's turn
 	####
     def CompTurn(s):
-        _, best_move = s.minimax(depth=3, alpha=float('-inf'), beta=float('inf'), maximizingPlayer=(s.compIsColour == s.pTurn))
+        _, best_move = s.minimax(
+            depth=3, 
+            alpha=float('-inf'), 
+            beta=float('inf'), 
+            maximizing_player=(s.compIsColour == s.pTurn), 
+            tiles=s.get_deep_board_copy(s.tiles),
+            color=s.pTurn
+        )
+        
         if best_move:
-            s.Action(best_move[0], best_move[1])
-            s.Action(best_move[2], best_move[3])
+            for x, y in best_move:
+                s.Action(x, y)
 
 
-    def minimax(s, depth, alpha, beta, maximizingPlayer):
-        if depth == 0 or s.GameOver():
-            return s.evaluate_board(), None
+
+    # Create a deep copy of the board state
+    def get_deep_board_copy(s, tiles):
+        return [[Tile(tile.win, tile.x, tile.y, tile.isPiece, tile.pieceColour, tile.pieceRank, hidden=True) for tile in row] for row in tiles]
+
+    # Generates all possible (legal and illegal) moves for a specific piece
+    def generateAllMovesForPiece(s, x, y):
+        possible_moves = []
+        directions = [(-1, -1), (-1, 1), (1, -1), (1, 1)]  # Diagonal directions
+
+        # Single-step moves (non-capturing)
+        for dx, dy in directions:
+            possible_moves.append([(x, y), (x + dx, y + dy)])
+
+        # Double-step moves (capturing)
+        for dx, dy in directions:
+            possible_moves.append([(x, y), (x + 2*dx, y + 2*dy)])
+        
+        return possible_moves
+
+    def evaluate_tiles(s, tiles):
+        score = 0
+        for i in range(s.BoardDimension):
+            for j in range(s.BoardDimension):
+                if tiles[i][j].isPiece:
+                    piece_score = 1 if tiles[i][j].isPawn else 3  # Assign score to piece type
+                    if tiles[i][j].isWhite:
+                        score += piece_score
+                    elif tiles[i][j].isBlack:
+                        score -= piece_score
+        return score
+
+    def minimax(s, depth, alpha, beta, maximizing_player, tiles, color):
+        
+        if not depth or not (available_moves := s.movesAvailable(tiles, color)):
+            return s.evaluate_tiles(tiles), None
 
         best_move = None
 
-        if maximizingPlayer:
+        if maximizing_player:
             max_eval = float('-inf')
-            for move in s.movesAvailable():
-                s.make_move(move)  # Apply move
-                eval, _ = s.minimax(depth - 1, alpha, beta, False)
-                s.undo_move(move)  # Undo move
-                if eval > max_eval:
-                    max_eval = eval
+            for move in available_moves:  # Get all possible moves
+                print(f'Evaluating Move for {color}: {move}  Depth: {depth}')
+                new_tiles = s.hidden_move(move, tiles)  # Apply hidden move
+                cur_eval, _ = s.minimax(depth - 1, alpha, beta, False, new_tiles, s.opposite(color))
+                print(f'Completed Evaluation for Move: {move}... Score: {cur_eval}')
+                if cur_eval > max_eval:
+                    print(f'Found Best Move for {color}: {move}')
+                    max_eval = cur_eval
                     best_move = move
-                alpha = max(alpha, eval)
+                alpha = max(alpha, cur_eval)
                 if beta <= alpha:
+                    print(f'Pruning Tree at Move: {move}')
                     break
             return max_eval, best_move
         else:
             min_eval = float('inf')
-            for move in s.movesAvailable():
-                s.make_move(move)  # Apply move
-                eval, _ = s.minimax(s, depth - 1, alpha, beta, True)
-                s.undo_move(move)  # Undo move
-                if eval < min_eval:
-                    min_eval = eval
+            for move in available_moves:  # Get all possible moves
+                print(f'Evaluating Move for {color}: {move}  Depth: {depth}')
+                new_tiles = s.hidden_move(move, tiles)  # Apply hidden move
+                cur_eval, _ = s.minimax(depth - 1, alpha, beta, True, new_tiles, s.opposite(color))
+                print(f'Completed Evaluation for Move: {move}... Score: {cur_eval}')
+                if cur_eval < min_eval:
+                    print(f'Found Best Move for {color}: {move}')
+                    min_eval = cur_eval
                     best_move = move
-                beta = min(beta, eval)
+                beta = min(beta, cur_eval)
                 if beta <= alpha:
+                    print(f'Pruning Tree at Move: {move}')
                     break
             return min_eval, best_move
-
-
-    def evaluate_board(s):
-        score = 0
-        for i in range(s.BoardDimension):
-            for j in range(s.BoardDimension):
-                if s.tiles[i][j].isPiece:
-                    piece_score = 1 if s.tiles[i][j].isPawn else 3  # Assign score to piece type
-                    if s.tiles[i][j].isWhite:
-                        score += piece_score
-                    elif s.tiles[i][j].isBlack:
-                        score -= piece_score
-        return score
-
-
-    # Adds a helper function to create a deep copy of the board state
-    def get_board_copy(s):
-        return [[Tile(tile.win, tile.x, tile.y, tile.isPiece, tile.pieceColour, tile.pieceRank) for tile in row] for row in s.tiles]
-
-    # Applies a move represented as a sequence of tuples [(start_x, start_y), (next_x, next_y), ...]
-    def make_move(s, move):
-        # Backup current state
-        s.previous_tiles = s.get_board_copy()
         
-        x, y = move[0]  # Start position of the piece
-        
-        # Iterate through the sequence of moves
-        for next_pos in move[1:]:
-            X, Y = next_pos
-            s.tiles[X][Y] = Tile(s.win, X, Y, True, s.tiles[x][y].pieceColour, s.tiles[x][y].pieceRank)
-
-            # Promote to King if reaching last row
-            if (Y == 7 and s.tiles[X][Y].isWhite) or (Y == 0 and s.tiles[X][Y].isBlack):
-                s.tiles[X][Y].pieceRank = 'King' 
-
-            s.tiles[x][y] = Tile(s.win, x, y, isPiece=False)
-
-            if abs(X - x) == 2:  # A piece was captured (jump of 2 spaces)
-                mid_x, mid_y = (x + X) // 2, (y + Y) // 2
-                s.tiles[mid_x][mid_y] = Tile(s.win, mid_x, mid_y, isPiece=False)
-
-            # Move to the next step in the move sequence
-            x, y = X, Y
-
-        s.pTurn = s.opposite(s.pTurn)  # Switch turn to opponent after completing the full move sequence
-
-    # Reverts the last move made
-    def undo_move(s):
-        if hasattr(s, 'previous_tiles'):
-            s.tiles = s.previous_tiles
-            s.previous_tiles = None
-            s.pTurn = s.opposite(s.pTurn)  # Revert turn back
-
-    # Checks if the game is over
-    def GameOver(s):
-        # Check if either player has no pieces left
-        if s.numColour('White') == 0 or s.numColour('Black') == 0:
-            return True
-
-        # Check if no moves are available for the current player
-        if not s.movesAvailable():
-            return True
-
-        return False
-
-
-    # Generates all possible moves for the current player
-    # Each move is represented as a list of tuples [(start_x, start_y), (end_x, end_y), ...]
-    def movesAvailable(s):
+    def movesAvailable(s, tiles, color):
         moves = []
-        for j in range(8):
-            for i in range(8):
-                if s.tiles[i][j].isPiece and s.tiles[i][j].pieceColour == s.pTurn:
-                    moves.extend(s.getAllValidMovesForPiece(i, j))
+        if s.isPlayable(tiles):
+            for j in range(8):
+                for i in range(8):
+                    if tiles[i][j].isPiece and tiles[i][j].pieceColour == color:
+                        moves.extend(s.getAllValidMovesForPiece(i, j, tiles))
+                    
         return moves
+    
+    def isPlayable(s, tiles):
+        w = b = 0
+        for row in tiles:
+            for tile in row:
+                if tile.isPiece:
+                    if tile.isWhite:
+                        w += 1
+                    else:
+                        b += 1
+                    
+        return w and b
 
     # Generates all valid moves for a given piece at position (x, y)
-    def getAllValidMovesForPiece(s, x, y):
+    def getAllValidMovesForPiece(s, x, y, tiles):
         piece_moves = []
 
         # Check for non-capturing moves
         for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
             X, Y = x + dx, y + dy
-            if s.validTileMove(x, y, X, Y):  # Check if the move is valid
+            if s.validTileMove(x, y, X, Y, tiles):  # Check if the move is valid
                 piece_moves.append([(x, y), (X, Y)])
 
         # Check for capturing moves (recursive for multiple captures)
-        piece_moves.extend(s.getCaptureMoves([(x, y)]))
+        piece_moves.extend(s.getCaptureMoves([(x, y)], tiles))
 
         return piece_moves
 
+    # Determines whether the tile attempting to be moved to is valid
+    def validTileMove(s, x, y, X, Y, tiles):
+        if not (0 <= X < 8 and 0 <= Y < 8):  # Ensure destination is within bounds
+            return False
+        
+        piece = tiles[x][y]
+
+        if tiles[X][Y].isPiece:
+            return False  # Destination is not empty
+
+        if (piece.isPawn) and ((piece.isWhite and Y < y) or (piece.isBlack and Y > y)):
+            return False
+
+        # Normal move: One diagonal step to an empty square
+        if abs(X - x) == 1 and abs(Y - y) == 1:
+            return True
+
+        # Capturing move: Two diagonal steps with opponent piece in between
+        if abs(X - x) == 2 and abs(Y - y) == 2:
+            mid_x, mid_y = (x + X) // 2, (y + Y) // 2
+            if tiles[mid_x][mid_y].isPiece and tiles[mid_x][mid_y].pieceColour == s.opposite(piece.pieceColour):
+                return True
+
+        return False
+    
     # Recursively generates all capture moves for a given piece following a path
-    def getCaptureMoves(s, path):
+    def getCaptureMoves(s, path, tiles):
         x, y = path[-1]
         capture_moves = []
+        additional = False
 
         for dx, dy in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
             X, Y = x + dx, y + dy
-            mid_x, mid_y = (x + X) // 2, (y + Y) // 2
 
             # Check if the capture move is valid
-            if s.validTileMove(x, y, X, Y) and s.tiles[mid_x][mid_y].isPiece and s.tiles[mid_x][mid_y].pieceColour == s.opposite(s.tiles[x][y].pieceColour):
-                # Add the new capture move to the path
-                new_path = path + [(X, Y)]
-                capture_moves.append(new_path)
-                # Recur for additional captures
-                capture_moves.extend(s.getCaptureMoves(new_path))
-
-        return capture_moves
+            if s.validTileMove(x, y, X, Y, tiles):
+                additional = True
+                capture_move = (X, Y)
+                # Temporarily apply the capture move to the board
+                new_tiles = s.hidden_move([(x, y), capture_move], tiles)  # Apply move
+                new_path = path + [capture_move]
                 
+                additional_captures = s.getCaptureMoves(new_path, new_tiles)
+                # If further captures exist, add them
+                if additional_captures:
+                    capture_moves.extend(additional_captures)
+                else:
+                    capture_moves.append(new_path)
+                    
+        if not additional:
+            return []
+        
+        return capture_moves
+
+    # Applies a hidden move represented as a sequence of tuples [(start_x, start_y), (next_x, next_y), ...]
+    def hidden_move(s, move, tiles):
+        temp_tiles = s.get_deep_board_copy(tiles)
+        # Backup current state
+        x, y = move[0]  # Start position of the piece
+        
+        # Iterate through the sequence of moves
+        for next_pos in move[1:]:
+            X, Y = next_pos
+            temp_tiles[X][Y] = Tile(s.win, X, Y, True, temp_tiles[x][y].pieceColour, temp_tiles[x][y].pieceRank, hidden=True)
+
+            # Promote to King if reaching last row
+            if (Y == 7 and temp_tiles[X][Y].isWhite) or (Y == 0 and temp_tiles[X][Y].isBlack):
+                temp_tiles[X][Y].pieceRank = 'King' 
+
+            temp_tiles[x][y] = Tile(s.win, x, y, isPiece=False, hidden=True)
+
+            if abs(X - x) == 2:  # A piece was captured (jump of 2 spaces)
+                mid_x, mid_y = (x + X) // 2, (y + Y) // 2
+                temp_tiles[mid_x][mid_y] = Tile(s.win, mid_x, mid_y, isPiece=False, hidden=True)
+
+            # Move to the next step in the move sequence
+            x, y = X, Y
+
+        return temp_tiles     
 
 	#Resets the board to be empty
     def ClearBoard(s):
@@ -520,22 +574,7 @@ class Checkers:
         else:
             return False
 
-    #+-added to determine whether the tile attempting to be moved to is valid
-    def validTileMove(s,X,Y):
-        if (0<=X<8 and 0<=Y<8): #Tile Clicked in Play
-            if s.selectedTileAt != []: #move if able
-                if s.selectedTileAt[0] == X and s.selectedTileAt[1] == Y and not s.pieceCaptured: #Re-Selecting the already selected piece de-selects it
-                    return False
-                elif s.pTurn == s.tiles[X][Y].pieceColour and not s.pieceCaptured and (s.PieceCanCapture(X,Y) or not s.PlayerCanCapture()): 
-                    return False
-                elif s.moveIsValid(s.selectedTileAt[0],s.selectedTileAt[1],X,Y):
-                    return True
-                else:
-                    return False
-            else: #Selecting a Piece to move
-                return False
-        else:
-            False 
+
 
     def moveIsValid(s,x,y,X,Y): #parameters -> self,starting x,starting y,final X,final Y
         #+-added if statement to ensure it the selected piece's turn
@@ -772,7 +811,7 @@ class Checkers:
 ##########
 
 class Tile:
-    def __init__(s,win,X,Y,isPiece,pieceColour='',pieceRank='',isSelected=False):
+    def __init__(s,win,X,Y,isPiece,pieceColour='',pieceRank='',isSelected=False, hidden=False):
         s.win = win
         s.x = X
         s.y = Y
@@ -793,21 +832,24 @@ class Tile:
         elif s.isPawn:
             s.pieceRank = 'Pawn'
 
-        s.c = Point(s.x+.5,s.y+.5)
-        s.circ = Circle(s.c,0.4)
+        s.hidden = hidden
 
-        if isSelected:
-            s.circ.setOutline('Yellow')
-        else:
-            s.circ.setOutline('Black')
-            s.circ.undraw()
+        if not s.hidden:
+            s.c = Point(s.x+.5,s.y+.5)
+            s.circ = Circle(s.c,0.4)
 
-        s.kingTxt = Text(s.c,'K')
-        s.kingTxt.undraw()
+            if isSelected:
+                s.circ.setOutline('Yellow')
+            else:
+                s.circ.setOutline('Black')
+                s.circ.undraw()
 
-        s.ColourButton(s.TileColour(s.x,s.y),s.x,s.y)
-        if s.isPiece:
-            s.DrawPiece()
+            s.kingTxt = Text(s.c,'K')
+            s.kingTxt.undraw()
+
+            s.ColourButton(s.TileColour(s.x,s.y),s.x,s.y)
+            if s.isPiece:
+                s.DrawPiece()
 ##########
 #function to create a rectangle with a given colour, size, and location
 ##########
