@@ -1,36 +1,13 @@
 from graphics import *
 import sys
-from tkinter import messagebox as tkMessageBox
+from tkinter import messagebox
 #+-added to be able to select a random number from a range of numbers
 from random import randrange
-
-debug_list = [
-    False,
-    False,
-    False,
-    False,
-    False,
-    False
-]
 
 '''
 The revisions in the code are labelled by the prefix '#+-'
 '''
 class Checkers:
-    
-    EVEN_ROWS = 0x0F0F0F0F
-    ODD_ROWS = 0xF0F0F0F0
-    NE_SLIDE_MASK = 0x0F7F7F7F
-    NW_SLIDE_MASK = 0x0EFEFEFE
-    SE_SLIDE_MASK = 0x7F7F7F70
-    SW_SLIDE_MASK = 0xFEFEFEF0
-    NE_CAP_MASK = 0x00777777
-    NW_CAP_MASK = 0x00EEEEEE
-    SE_CAP_MASK = 0x77777700
-    SW_CAP_MASK = 0xEEEEEE00
-    N_PROMOTION_MASK = 0xF0000000
-    S_PROMOTION_MASK = 0x0000000F
-    
     def __init__(s):
         s.state = 'CustomSetup'
         s.is1P = False
@@ -40,26 +17,6 @@ class Checkers:
         s.placeRank = 'Pawn'
         s.placeType = 'Place'                   #Place or Delete (piece)
         s.pTurn = 'White'                       #White or Black (turn)
-        
-        s.comp_depth = 14
-        
-        s.N_SLIDES = [s.slide_ne, s.slide_nw]
-        s.S_SLIDES = [s.slide_se, s.slide_sw]
-        
-        s.N_CAPTURES = [s.cap_ne, s.cap_nw]
-        s.S_CAPTURES = [s.cap_se, s.cap_sw]
-        
-        s.SLIDES = s.N_SLIDES + s.S_SLIDES
-        s.CAPTURES = s.N_CAPTURES + s.S_CAPTURES
-        
-        s.ANTI_SLIDES = {
-            slide:s.anti_slide(slide) for slide in s.SLIDES
-        }
-        
-        s.ANTI_CAPTURES = {
-            capture:s.anti_cap(capture) for capture in s.CAPTURES
-        }
-        
         
         s.selectedTile = ''
         s.selectedTileAt = []
@@ -104,7 +61,6 @@ class Checkers:
     def Play(s):
         while s.state == 'Play':
             #+-added if statement
-            print('Playing')
             if s.is1P and s.compIsColour == s.pTurn:
                 s.CompTurn()
             else:
@@ -115,314 +71,145 @@ class Checkers:
     #+-added to be able to control the computer's turn
 	####
     def CompTurn(s):
+        s.moves = s.movesAvailable()
+        s.badMoves = []
+        #######consider making s.goodMoves which replaces s.badMoves for many uses (changes conditions a bit as well)
 
-        # Use the function to get the bitboards
-        s.translate_to_bitboard()
-    
-        # Represent color as a bit, White = 1, Black = 0
-        color = 1 if s.pTurn == 'White' else 0
         
-        if color:
-            pawns = s.bitboard['white_pawns']
-            kings = s.bitboard['white_kings']
-            opp_pawns = s.bitboard['black_pawns']
-            opp_kings = s.bitboard['black_kings']
+        #To prevent leaving the back row (currently top priority)
+        for move in s.moves:
+            if s.movesFromBack(move):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #This may not always work, it is not expected/designed to (hopefully it usually works)
+        #It is meant to promote the use of moves that allow capture of another piece afterwards
+        for move in s.moves:
+            if not s.PieceCanCapture(s.moveEndsAt(move)[0],s.moveEndsAt(move)[1]):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #Promotes move which make kings
+        for move in s.moves:
+            if not (((s.moveEndsAt(move)[1]==7 and s.tiles[move[0]][move[1]].isWhite) or \
+               (s.moveEndsAt(move)[1]==0 and s.tiles[move[0]][move[1]].isBlack)) and \
+                    s.tiles[move[0]][move[1]].isPawn):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+
+        #Promotes moves which take kings for free
+        for move in s.moves:
+            if not ((s.tiles[move[2]][move[3]].isKing) and s.isMoveSafe(move)):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #This may not always work, it is not expected/designed to (hopefully it usually works)
+        #Promotes moves which trade your pawn for opponent king
+        for move in s.moves:
+            if not ((s.tiles[move[0]][move[1]].isPawn) and (s.tiles[move[2]][move[3]].isKing) and not s.isMoveSafe(move)):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #This may not always work, it is not expected/designed to (hopefully it usually works)
+        #Promotes moves which trade kings when ahead in ***pieces <--might want to change classification of being ahead
+        for move in s.moves:
+            if not ((s.tiles[move[0]][move[1]].isKing) and (s.tiles[move[2]][move[3]].isKing) and not s.isMoveSafe(move) and s.hasMorePieces()):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #This may not always work, it is not expected/designed to (hopefully it usually works)
+        #Promotes moves which trade pawns when ahead in ***pieces <--might want to change classification of being ahead
+        for move in s.moves:
+            if not ((s.tiles[move[0]][move[1]].isPawn) and (s.tiles[move[2]][move[3]].isPawn) and not s.isMoveSafe(move) and s.hasMorePieces()):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+
+        #Promotes moves which does not endanger itself needlessly
+        for move in s.moves:
+            if not s.isMoveSafe(move):
+                s.badMoves.append(move)
+        s.removeBadMoves()
+        
+        #should implement the next part to pick at random from the remaining moves (does not do this)
+        #performs the select and move action for the computer
+        m = randrange(0,len(s.moves))
+        if s.selectedTileAt == []:
+            s.Action(s.moves[m][0],s.moves[m][1])
+        s.Action(s.moves[m][2],s.moves[m][3])
+
+    ####
+	#+-added to determine whether the player whose turn it is has more pieces than opponent
+	####
+    def hasMorePieces(s):
+        return s.numColour(s.pTurn) > s.numColour(s.opposite(s.pTurn))
+    
+    #+-added new method
+    #Returns true if a GIVEN piece cannot be taken immediately after ITS proposed move
+    #########Might want another method to know if a move exposes another piece
+    #Likely to not work (depends on how PieceCanCapturePiece method works)
+    def isMoveSafe(s,move):
+        X1,Y1 = [s.moveEndsAt(move)[0]-1,s.moveEndsAt(move)[0]+1],[s.moveEndsAt(move)[1]-1,s.moveEndsAt(move)[1]+1]
+        for i in range(2):
+            for j in range(2):
+                if s.SpecialPCCP(s.tiles[move[0]][move[1]].pieceColour,X1[i],Y1[j],s.moveEndsAt(move)[0],s.moveEndsAt(move)[1],move[0],move[1]):
+                    return False
+        return True
+
+    #+-added new method
+    #modification to PieceCanCapturePiece such that it works with the isMoveSafe method
+    def SpecialPCCP(s,piece2Colour,x,y,X,Y,initX,initY):
+
+        X1,X2,Y1,Y2 = [x-1,x+1],[x-2,x+2],[y-1,y+1],[y-2,y+2]
+        if ((0<=X<8) and (0<=Y<8)) and ((0<=x<8) and (0<=y<8)):
+            if (piece2Colour == s.opposite(s.tiles[x][y].pieceColour)):
+                if s.CanDoWalk(x,y,X,Y,exception=False):
+                    for i in range(2):
+                        for j in range(2):
+                            if X1[i]==X and Y1[j]==Y:
+                                if (0<=X2[i]<8) and (0<=Y2[j]<8):
+                                    if not (s.tiles[X2[i]][Y2[j]].isPiece) or (X2[i]==initX and Y2[j]==initY):
+                                        return True
+        return False
+
+    #+-added new method
+    #Removes badMoves from the list of moves that can be made
+    #if all of the moves that can be made are badMoves, we still need to do something so it leaves all of them
+    #Note: at any time this is run, the moves that are considered bad should be considered bad for the same reason (i.e. they are equivalently bad)
+    def removeBadMoves(s):  #assumes moves were added to badMoves in the same order as they appear in moves
+        if s.moves != s.badMoves:
+            for move in s.badMoves:
+                s.moves.remove(move)
+        s.badMoves = []
+
+    #+-added new method
+    def movesFromBack(s,move):
+        if (move[1]==0 and s.compIsColour=='White') or \
+               (move[1]==7 and s.compIsColour=='Black'):
+            return True
         else:
-            pawns = s.bitboard['black_pawns']
-            kings = s.bitboard['black_kings']
-            opp_pawns = s.bitboard['white_pawns']
-            opp_kings = s.bitboard['white_kings']
-        
-        max_eval, best_move = s.negamax(
-            depth = s.comp_depth, 
-            alpha = float('-inf'), 
-            beta = float('inf'), 
-            color = color, 
-            pawns = pawns,
-            kings = kings,
-            opp_pawns = opp_pawns,
-            opp_kings = opp_kings
-        )
-        
-        print(f'Computer Evaluation: {max_eval}')
-        
-        s.bitboard['black_pawns'], s.bitboard['black_kings'], s.bitboard['white_pawns'], s.bitboard['white_kings'] = best_move
-        s.translate_to_board()
-        s.pTurn = s.opposite(s.pTurn)
-        
-        s.SetButtons()
-        #+-added if statement to check defeat
-        if s.movesAvailable() == [] and s.numColour(s.pTurn):
-            tkMessageBox.showinfo("Defeat", str(s.pTurn) + ' has no available moves! ' + str(s.opposite(s.pTurn)) + ' wins!')
-            s.state = 'CustomSetup'
-            s.SetButtons()        
-        
-    def slide_ne(s, pieces):
-        return ((pieces & s.NE_SLIDE_MASK & s.EVEN_ROWS) << 4) | ((pieces & s.NE_SLIDE_MASK & s.ODD_ROWS) << 5)
-    
-    def slide_nw(s, pieces):
-        return ((pieces & s.NW_SLIDE_MASK & s.EVEN_ROWS) << 3) | ((pieces & s.NW_SLIDE_MASK & s.ODD_ROWS) << 4)
-    
-    def slide_se(s, pieces):
-        return ((pieces & s.SE_SLIDE_MASK & s.EVEN_ROWS) >> 4) | ((pieces & s.SE_SLIDE_MASK & s.ODD_ROWS) >> 3)
-    
-    def slide_sw(s, pieces):
-        return ((pieces & s.SW_SLIDE_MASK & s.EVEN_ROWS) >> 5) | ((pieces & s.SW_SLIDE_MASK & s.ODD_ROWS) >> 4)
-    
-    def cap_ne(s, pieces):
-        return (pieces & s.NE_CAP_MASK) << 9
-    
-    def cap_nw(s, pieces):
-        return (pieces & s.NW_CAP_MASK) << 7
-    
-    def cap_se(s, pieces):
-        return (pieces & s.SE_CAP_MASK) >> 7
-    
-    def cap_sw(s, pieces):
-        return (pieces & s.SW_CAP_MASK) >> 9
+            return False
 
-    def captures(s, pieces, pawns, kings, opp_pawns, opp_kings, captures, promotion_mask):
-        opp_pieces = opp_pawns | opp_kings
-        empty_sqs = ~(pawns | kings | opp_pieces)
-        
-        additional = False
-        moves = set()
-        for capture in captures:
-            slide = getattr(s, capture.__name__.replace('cap', 'slide'))
-            
-            land_sqs = slide(opp_pieces) # Squares where a capturing piece would land
-            cap_sqs = capture(pieces) & land_sqs & empty_sqs # Squares where pieces can capture
-            
-            while cap_sqs:
-                additional = True
-                
-                lsb = cap_sqs & -cap_sqs # Least significant bit, represents a capture square
-                start = s.ANTI_CAPTURES[capture](lsb) # Starting square of the capturing piece
-                mid = s.ANTI_SLIDES[slide](lsb) # Middle square of the capture
-                
-                promoted_pawns = lsb & promotion_mask
-                static_move = start | lsb
-                
-                # Check if the capturing piece is a pawn
-                if start & pawns:
-                    # Check if the pawn landed on a promote square
-                    if promoted_pawns:
-                        new_pawns = pawns ^ start # Remove the capturing pawn
-                        new_kings = kings | lsb # Replace with a king
-                    else:
-                        new_pawns = pawns ^ static_move # Move the capturing pawn
-                        new_kings = kings # No change in kings
-                else:
-                    new_pawns = pawns # No change in pawns
-                    new_kings = kings ^ static_move # Move the capturing king
-                
-                new_opp_pawns = opp_pawns & ~(mid & opp_pawns) # Get the new opponent pawns
-                new_opp_kings = opp_kings & ~(mid & opp_kings) # Get the new opponent kings
-                
-                new_captures = s.CAPTURES if promoted_pawns else captures
-                
-                moves.update(
-                    s.captures(
-                        pieces = lsb,
-                        pawns = new_pawns,
-                        kings = new_kings,
-                        opp_pawns = new_opp_pawns,
-                        opp_kings = new_opp_kings,
-                        captures = new_captures,
-                        promotion_mask = promotion_mask,
-                    )
-                )
-                
-                cap_sqs &= cap_sqs - 1 
-                
-        if additional:
-            return moves
+    #+-added new method
+    def moveEndsAt(s,move): #takes 4 element array representing a move
+        if s.tiles[move[2]][move[3]].isPiece:
+            return [move[0]+(move[2]-move[0])*2,move[1]+(move[3]-move[1])*2]
         else:
-            return [(pawns, kings, opp_pawns, opp_kings)]
-
-    def valid_moves(s, pawns, kings, opp_pawns, opp_kings, color):
-        moves = set()
-        
-        if color:
-            slides = s.N_SLIDES
-            pawn_captures = s.N_CAPTURES
-            promotion_mask = s.N_PROMOTION_MASK
-        else:
-            slides = s.S_SLIDES
-            pawn_captures = s.S_CAPTURES
-            promotion_mask = s.S_PROMOTION_MASK
-        
-        empty_sqs = ~(pawns | kings | opp_pawns | opp_kings)
-        
-
-        moves.update(
-            s.captures(
-                pieces = pawns,
-                pawns = pawns,
-                kings = kings,
-                opp_pawns = opp_pawns,
-                opp_kings = opp_kings, 
-                captures = pawn_captures, 
-                promotion_mask = promotion_mask
-            )
-        )
-        
-        moves.update(
-            s.captures(
-                pieces = kings,
-                pawns = pawns,
-                kings = kings,
-                opp_pawns = opp_pawns,
-                opp_kings = opp_kings, 
-                captures = s.CAPTURES, 
-                promotion_mask = promotion_mask
-            )
-        )
-        
-        moves = [move for move in moves if move != (pawns, kings, opp_pawns, opp_kings)]
-        
-        if not moves:
-            if pawns:
-                for slide in slides:
-
-                    slide_sqs = slide(pawns) & empty_sqs
-                    
-                    while slide_sqs:
-                        lsb = slide_sqs & -slide_sqs
-                        moves.append((
-                            (s.ANTI_SLIDES[slide](lsb) | (lsb & ~promotion_mask)) ^ pawns,
-                            (lsb & promotion_mask) | kings,
-                            opp_pawns,
-                            opp_kings
-                        ))
-                        slide_sqs &= slide_sqs - 1 
-                        
-
-                
-            if kings:
-                for slide in s.SLIDES:
-                    slide_sqs = slide(kings) & empty_sqs
-                    while slide_sqs:
-                        lsb = slide_sqs & -slide_sqs
-                        moves.append((
-                            pawns,
-                            (s.ANTI_SLIDES[slide](lsb) | lsb) ^ kings,
-                            opp_pawns,
-                            opp_kings
-                        ))
-                        slide_sqs &= slide_sqs - 1
-            
-
-
+            return [move[2],move[3]]
+    
+    #+-added to calculate all the available valid moves
+    def movesAvailable(s):
+        moves=[]
+        for j in range(8):
+            for i in range(8):
+                X1,Y1 = [i-1,i+1],[j-1,j+1]
+                for a in range(2):
+                    for b in range(2):
+                        if 0<=X1[a]<8 and 0<=Y1[b]<8:
+                            if s.moveIsValid(i,j,X1[a],Y1[b]):
+                                moves.append([i,j,X1[a],Y1[b]])
         return moves
-
-    def evaluate_bitboards(s, pawns:int, kings:int, opp_pawns:int, opp_kings:int):
-        return pawns.bit_count() + 3 * kings.bit_count() - (opp_pawns.bit_count() + 3 * opp_kings.bit_count())
-    
-    def negamax(s, depth:int, alpha:float, beta:float, color:int, pawns:int, kings:int, opp_pawns:int, opp_kings:int):
-        valid_moves = s.valid_moves(pawns, kings, opp_pawns, opp_kings, color) # Obtain all valid moves for the evaluating color's pieces
-        
-        # If depth is 0, evaluate the position
-        if not depth:
-
-            return s.evaluate_bitboards(pawns, kings, opp_pawns, opp_kings), None
-        
-        best_move = None # Initialize the best move to None
-        max_eval = float('-inf') # Initialize the evaluation lower bound to negative infinity
-
-        # Check that there are valid moves
-        if valid_moves:
-            # Best move defaults to the first valid move to handle cases where all moves evaluate to -inf
-            best_move = valid_moves[0]
-            # Loop through all valid moves
-            for pawns, kings, opp_pawns, opp_kings in valid_moves:
-                       
-                # Recursively call the negamax function at deiterated depth, swapping the alpha, beta, and color
-                cur_eval, _ = s.negamax(
-                    depth = depth - 1, 
-                    alpha = -beta, 
-                    beta = -alpha, 
-                    color = ~color, 
-                    pawns = opp_pawns,
-                    kings = opp_kings,
-                    opp_pawns = pawns,
-                    opp_kings = kings
-                )
                 
-                cur_eval *= -1
-                
-                # Check if the move evaluation is the current maximum evaluation
-                if cur_eval > max_eval:
-                    max_eval = cur_eval # Reassign the max evaluation
-                    best_move = (pawns, kings, opp_pawns, opp_kings) # Reassign the best move
-                
-                alpha = max(alpha, cur_eval) # Adjust the alpha value
-                
-                # Alpha-beta pruning
-                if alpha >= beta:
-                    break
-
-        return max_eval, best_move    
-    
-    def translate_to_board(s):
-        # Clear the current board
-        s.tiles = [[Tile(s.win, x, y, isPiece=False) for x in range(s.BoardDimension)] for y in range(s.BoardDimension)]
-
-        # Iterate over the bitboards to update the board
-        for bit_position in range(32):
-            y, x = divmod(bit_position, 4)
-            x*= 2
-            x += bit_position // 4 % 2 
-            if s.bitboard['white_pawns'] & (1 << bit_position):
-                s.tiles[x][y] = Tile(s.win, x, y, isPiece=True, pieceColour='White', pieceRank='Pawn')
-            elif s.bitboard['white_kings'] & (1 << bit_position):
-                s.tiles[x][y] = Tile(s.win, x, y, isPiece=True, pieceColour='White', pieceRank='King')
-            elif s.bitboard['black_pawns'] & (1 << bit_position):
-                s.tiles[x][y] = Tile(s.win, x, y, isPiece=True, pieceColour='Black', pieceRank='Pawn')
-            elif s.bitboard['black_kings'] & (1 << bit_position):
-                s.tiles[x][y] = Tile(s.win, x, y, isPiece=True, pieceColour='Black', pieceRank='King')
-
-    def translate_to_bitboard(s):
-        s.bitboard = {
-            'white_pawns': 0,
-            'white_kings': 0,
-            'black_pawns': 0,
-            'black_kings': 0,
-            'white_pieces': 0,
-            'black_pieces': 0,
-            'all_pieces': 0
-        }
-
-
-        # Iterate over the board to update bitboards
-        for y in range(s.BoardDimension):
-            for x in range(s.BoardDimension):
-                if (x + y) % 2 == 0:  # Check only dark squares
-                    tile = s.tiles[x][y]
-                    if tile.isPiece:
-                        # Calculate the bit position for the 32-bit representation (index 0 to 31)
-                        bit_position = (y * 4) + (x // 2)
-                        
-                        # Update the corresponding bitboard based on piece type and color
-                        if tile.pieceColour == 'White':
-                            if tile.pieceRank == 'Pawn':
-                                s.bitboard['white_pawns'] |= (1 << bit_position)
-                            elif tile.pieceRank == 'King':
-                                s.bitboard['white_kings'] |= (1 << bit_position)
-                        elif tile.pieceColour == 'Black':
-                            if tile.pieceRank == 'Pawn':
-                                s.bitboard['black_pawns'] |= (1 << bit_position)
-                            elif tile.pieceRank == 'King':
-                                s.bitboard['black_kings'] |= (1 << bit_position)
-                                
-        s.bitboard['white_pieces'] = s.bitboard['white_pawns'] | s.bitboard['white_kings']
-        s.bitboard['black_pieces'] = s.bitboard['black_pawns'] | s.bitboard['black_kings']
-        s.bitboard['all_pieces'] = s.bitboard['white_pieces'] | s.bitboard['black_pieces']
-
-
-    def debug_log(s, string):
-        s.log_file.write(string + "\n")
-        s.log_file.flush()  # Ensure immediate write to the file 
 
 	#Resets the board to be empty
     def ClearBoard(s):
@@ -601,7 +388,7 @@ class Checkers:
             num_wh = s.numColour('White')
             num_bl = s.numColour('Black')
             if ((num_wh == 0) and (num_bl == 0)): #This means there are no pieces on the board; this is a pointless setup.
-                tkMessageBox.showinfo("Error", "No pieces have been placed!")
+                messagebox.showinfo("Error", "No pieces have been placed!")
             else:
                 s.state = 'Play'
                 s.SetButtons()
@@ -642,27 +429,14 @@ class Checkers:
             s.SetButtons()
         elif (0<=X<8 and 0<=Y<8): #Tile clicked in CustomSetup
             if s.tiles[X][Y].TileColour(X,Y) == 'White': #Clicked tile is White
-                tkMessageBox.showinfo("Error", "Illegal Placement")
+                messagebox.showinfo("Error", "Illegal Placement")
             elif s.numColour(s.placeColour) >= s.numPiecesAllowed and s.placeType == 'Place': #clicked tile would result in too many of colour being placed
-                tkMessageBox.showinfo("Error", "Illegal Placement")
+                messagebox.showinfo("Error", "Illegal Placement")
             elif (Y == 7 and s.placeColour == 'White' and not(s.placeRank == 'King')) or (Y == 0 and s.placeColour == 'Black' and not(s.placeRank == 'King')): #placing a non-king on a king square
-                tkMessageBox.showinfo("Error", "Illegal Placement")
+                messagebox.showinfo("Error", "Illegal Placement")
             else: #Valid tile update action (i.e. piece placement or deletion)
                 s.tiles[X][Y] = Tile(s.win,X,Y,s.placeType == 'Place',s.placeColour,s.placeRank)    #updates that square in array
                 s.SetButtons()
-
-    #+-added to calculate all the available valid moves
-    def movesAvailable(s):
-        moves=[]
-        for j in range(8):
-            for i in range(8):
-                X1,Y1 = [i-1,i+1],[j-1,j+1]
-                for a in range(2):
-                    for b in range(2):
-                        if 0<=X1[a]<8 and 0<=Y1[b]<8:
-                            if s.moveIsValid(i,j,X1[a],Y1[b]):
-                                moves.append([i,j,X1[a],Y1[b]])
-        return moves
 
 	#Handles mouse clicks
     def clickInPlay(s,X,Y):
@@ -673,7 +447,7 @@ class Checkers:
             s.SaveSetupToFile()
         elif (6<=X<8 and -3<=Y<-2): #Resign clicked
         #+-added message box indicating which player had quit/resigned
-            tkMessageBox.showinfo("Resignation", str(s.pTurn) + ' has resigned! ' + str(s.opposite(s.pTurn)) + ' wins!')
+            messagebox.showinfo("Resignation", str(s.pTurn) + ' has resigned! ' + str(s.opposite(s.pTurn)) + ' wins!')
             s.state = 'CustomSetup'
             s.SetButtons()
         elif (0<=X<8 and 0<=Y<8): #Tile Clicked in Play
@@ -699,17 +473,17 @@ class Checkers:
                         s.SetButtons()
                         #+-added if statement to check defeat
                         if s.movesAvailable() == [] and s.numColour(s.pTurn):
-                            tkMessageBox.showinfo("Defeat", str(s.pTurn) + ' has no available moves! ' + str(s.opposite(s.pTurn)) + ' wins!')
+                            messagebox.showinfo("Defeat", str(s.pTurn) + ' has no available moves! ' + str(s.opposite(s.pTurn)) + ' wins!')
                             s.state = 'CustomSetup'
                             s.SetButtons()
 
                 else:
-                    tkMessageBox.showinfo("Error", "Cannot perform that action.")
+                    messagebox.showinfo("Error", "Cannot perform that action.")
             else: #Select a Piece to move
                 if s.pTurn != s.tiles[X][Y].pieceColour:
-                    tkMessageBox.showinfo("Error", "Select a piece of current player's colour")
+                    messagebox.showinfo("Error", "Select a piece of current player's colour")
                 elif (not s.PieceCanCapture(X,Y)) and s.PlayerCanCapture():
-                    tkMessageBox.showinfo("Error", "Invalid selection, current player must take a piece")
+                    messagebox.showinfo("Error", "Invalid selection, current player must take a piece")
                 else:
                     s.selectedTileAt = [X,Y]
                     s.tiles[X][Y] = Tile(s.win,X,Y,s.tiles[X][Y].isPiece,s.tiles[X][Y].pieceColour,s.tiles[X][Y].pieceRank,isSelected=True)
@@ -736,7 +510,22 @@ class Checkers:
         else:
             return False
 
-
+    #+-added to determine whether the tile attempting to be moved to is valid
+    def validTileMove(s,X,Y):
+        if (0<=X<8 and 0<=Y<8): #Tile Clicked in Play
+            if s.selectedTileAt != []: #move if able
+                if s.selectedTileAt[0] == X and s.selectedTileAt[1] == Y and not s.pieceCaptured: #Re-Selecting the already selected piece de-selects it
+                    return False
+                elif s.pTurn == s.tiles[X][Y].pieceColour and not s.pieceCaptured and (s.PieceCanCapture(X,Y) or not s.PlayerCanCapture()): 
+                    return False
+                elif s.moveIsValid(s.selectedTileAt[0],s.selectedTileAt[1],X,Y):
+                    return True
+                else:
+                    return False
+            else: #Selecting a Piece to move
+                return False
+        else:
+            False 
 
     def moveIsValid(s,x,y,X,Y): #parameters -> self,starting x,starting y,final X,final Y
         #+-added if statement to ensure it the selected piece's turn
@@ -763,12 +552,12 @@ class Checkers:
         s.tiles[X][Y] = Tile(s.win,X,Y,True,s.tiles[X][Y].pieceColour,s.tiles[X][Y].pieceRank)
         s.tiles[x][y] = Tile(s.win,x,y,isPiece=False)
         if X-x == 2 or X-x == -2:
-            if s.numColour(s.tiles[int(x+(X-x)/2)][int(y+(Y-y)/2)].pieceColour) == 1:
-                tkMessageBox.showinfo("Winner", str(s.tiles[X][Y].pieceColour) + ' Wins!')
+            if s.numColour(s.tiles[x+(X-x)/2][y+(Y-y)/2].pieceColour) == 1:
+                messagebox.showinfo("Winner", str(s.tiles[X][Y].pieceColour) + ' Wins!')
                 #+-updated to allow another game to be played after a winner is declared
                 s.state = 'CustomSetup'
                 s.SetButtons()
-            s.tiles[int(x+(X-x)/2)][int(y+(Y-y)/2)] = Tile(s.win,x+(X-x)/2,y+(Y-y)/2,isPiece=False)
+            s.tiles[x+(X-x)/2][y+(Y-y)/2] = Tile(s.win,x+(X-x)/2,y+(Y-y)/2,isPiece=False)
 
             s.tiles[X][Y] = Tile(s.win,X,Y,True,s.tiles[X][Y].pieceColour,s.tiles[X][Y].pieceRank)
             if s.PieceCanCapture(X,Y):
@@ -872,26 +661,6 @@ class Checkers:
                     c += 1
         return c
 
-    def anti_cap(s, cap):
-        if cap == s.cap_nw:
-            return s.cap_se
-        elif cap == s.cap_ne:
-            return s.cap_sw
-        elif cap == s.cap_sw:
-            return s.cap_ne
-        elif cap == s.cap_se:
-            return s.cap_nw
-
-    def anti_slide(s, slide):
-        if slide == s.slide_ne:
-            return s.slide_sw
-        elif slide == s.slide_sw:
-            return s.slide_ne
-        elif slide == s.slide_nw:
-            return s.slide_se
-        elif slide == s.slide_se:
-            return s.slide_nw        
-
     def opposite(s,opp): #Returns the 'opposite' of a given parameter (only works for specific things)
         if opp == 'White':
             return 'Black'
@@ -907,9 +676,6 @@ class Checkers:
             return 'Delete'
         elif opp == 'Delete':
             return 'Place'
-        
-
-        
         else:
             #+-returns instead of printing error message
             return opp
@@ -947,7 +713,7 @@ class Checkers:
                     saveFile.write(i_string + j_string + str(s.tiles[i][j].pieceColour)[0] + \
                                    str(s.tiles[i][j].pieceRank)[0] + "\n")
         saveFile.write(s.pTurn[0]) #saves whose turn it is too
-        tkMessageBox.showinfo("Saved Complete", "Game setup was saved to checkers.txt")
+        messagebox.showinfo("Saved Complete", "Game setup was saved to checkers.txt")
         saveFile.close()
 
 ##########################
@@ -956,7 +722,7 @@ class Checkers:
     def LoadSetupFromFile(s): #method gets the setup saved and places pieces accordingly
         loadFile = open ('checkers.txt' , 'r') #opens file to read
         piece_list = loadFile.readlines()
-        tkMessageBox.showinfo("Loading", "Will now clear the board and \nplace the saved setup")
+        messagebox.showinfo("Loading", "Will now clear the board and \nplace the saved setup")
         s.ClearBoard()
         for i in range(len(piece_list) - 1):
             tot_string = piece_list[i]
